@@ -52,8 +52,8 @@ def convert_h5_to_sparse_csr(filename, out_filename, chunksize=2500):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data_dir", metavar="PATH")
-    parser.add_argument("--output_data_dir", metavar="PATH")
+    parser.add_argument("--data_dir", default=r'D:\04_project\03_RNA2ADT\data')
+    parser.add_argument("--output_data_dir", default=r'D:\04_project\03_RNA2ADT\data\processed')
     args = parser.parse_args()
 
     data_dir = args.data_dir
@@ -67,15 +67,16 @@ def main():
         convert_to_parquet(os.path.join(data_dir, f"{file_prefix}.csv"), os.path.join(output_data_dir, file_prefix))
     file_prefixes = [
         "test_cite_inputs",
-        "test_multi_inputs",
+        # "test_multi_inputs",
         "train_cite_inputs",
         "train_cite_targets",
-        "train_multi_inputs",
-        "train_multi_targets",
+        # "train_multi_inputs",
+        # "train_multi_targets",
     ]
     for file_prefix in file_prefixes:
         convert_h5_to_sparse_csr(os.path.join(data_dir, f"{file_prefix}.h5"), os.path.join(output_data_dir, file_prefix))
 
 
 if __name__ == "__main__":
+    
     main()

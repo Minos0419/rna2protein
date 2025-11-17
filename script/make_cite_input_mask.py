@@ -7,6 +7,8 @@ import pandas as pd
 import scipy
 import scipy.sparse
 import scipy.stats
+import sys
+sys.path.append(r'D:\04_project\03_RNA2ADT\open-problems-multimodal')
 
 from ss_opm.utility.get_group_id import get_group_id
 from ss_opm.utility.nonzero_median_normalize import median_normalize
@@ -208,10 +210,10 @@ def make_cite_inputs_targets_pair_pathway(
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data_dir", metavar="PATH")
-    parser.add_argument("--output_data_dir", metavar="PATH")
-    parser.add_argument("--hgnc_complete_set_path", metavar="PATH", help="path of hgnc_complete_set.txt")
-    parser.add_argument("--reactome_pathways_path", metavar="PATH", help="path of ReactomePathways.gmt")
+    parser.add_argument("--data_dir", default=r'D:\04_project\03_RNA2ADT\data\processed')
+    parser.add_argument("--output_data_dir", default=r'D:\04_project\03_RNA2ADT\data\processed')
+    parser.add_argument("--hgnc_complete_set_path", default=r"D:\04_project\03_RNA2ADT\hgnc_complete_set.txt", help="path of hgnc_complete_set.txt")
+    parser.add_argument("--reactome_pathways_path", default=r"D:\04_project\03_RNA2ADT\ReactomePathways.gmt", help="path of ReactomePathways.gmt")
 
     args = parser.parse_args()
 

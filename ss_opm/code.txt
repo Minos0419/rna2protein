@@ -1,0 +1,6 @@
+export DATA_DIR=D:\04_project\03_RNA2ADT\data
+python3 script/make_compressed_dataset.py --data_dir ${DATA_DIR}
+python3 script/make_additional_files.py --data_dir ${DATA_DIR}
+python3 script/make_cite_input_mask.py --data_dir ${DATA_DIR} --hgnc_complete_set_path /path/to/hgnc_complete_set --reactome_pathways_path /path/to/reactome_pathways
+
+scp -O -r D:\04_project\03_RNA2ADT yu.li@ciai.mbzuai.ac.ae:/l/users/yu.li/zgy/

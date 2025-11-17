@@ -6,7 +6,8 @@ import pandas as pd
 import scipy
 import scipy.sparse
 from sklearn.decomposition import TruncatedSVD
-
+import sys
+sys.path.append(r'D:\04_project\03_RNA2ADT\open-problems-multimodal')
 from ss_opm.utility.get_group_id import get_group_id
 from ss_opm.utility.nonzero_median_normalize import median_normalize
 
@@ -237,10 +238,48 @@ def make_cite_batch_inputs_median(data_dir, metadata, output_data_dir):
     normalized_df.to_parquet(out_filename)
 
 
+import numpy as np
+import scipy.sparse
+
+def median_normalize(values, ignore_zero=True, log=False):
+    """
+    Median-normalize rows of `values` in-place to avoid huge temporary arrays.
+    If you need to keep `values` unchanged, call this as:
+        normalized = median_normalize(values.copy(), ...)
+    """
+    # If sparse, convert once to dense (you can’t avoid the 10GB here if you want dense output)
+    if isinstance(values, scipy.sparse.csr_matrix):
+        values = values.toarray()
+
+    # Ensure float32 (or float16 if you really need to save more memory)
+    values = values.astype(np.float32, copy=False)
+
+    if ignore_zero:
+        # Mark zeros as NaN in-place
+        zero_mask = (values == 0)
+        values[zero_mask] = np.nan
+
+        # Row-wise median ignoring NaNs
+        nonzero_median = np.nanquantile(values, q=0.5, axis=1).astype(values.dtype)
+
+        # Put zeros back
+        values[zero_mask] = 0.0
+    else:
+        nonzero_median = np.quantile(values, q=0.5, axis=1).astype(values.dtype)
+
+    # Avoid creating a new big array: normalize in-place
+    # shape of nonzero_median[:, None] is (N, 1), but broadcasting is handled per-row inside the ufunc
+    if log:
+        values -= nonzero_median[:, None]
+    else:
+        values /= nonzero_median[:, None]
+
+    return values
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data_dir", metavar="PATH")
-    parser.add_argument("--output_data_dir", metavar="PATH")
+    parser.add_argument("--data_dir", default=r'D:\04_project\03_RNA2ADT\data\processed')
+    parser.add_argument("--output_data_dir", default=r'D:\04_project\03_RNA2ADT\data\processed')
     args = parser.parse_args()
 
     data_dir = args.data_dir
@@ -254,10 +293,10 @@ def main():
     group_ids = get_group_id(metadata)
     metadata["group"] = group_ids
 
-    make_multi_cell_statistics(data_dir=data_dir, output_data_dir=output_data_dir)
+    # make_multi_cell_statistics(data_dir=data_dir, output_data_dir=output_data_dir)
     make_cite_cell_statistics(data_dir=data_dir, output_data_dir=output_data_dir)
 
-    make_multi_batch_statistics(metadata=metadata, output_data_dir=output_data_dir)
+    # make_multi_batch_statistics(metadata=metadata, output_data_dir=output_data_dir)
     make_cite_batch_statistics(metadata=metadata, output_data_dir=output_data_dir)
 
     make_cite_batch_inputs_median(data_dir=data_dir, metadata=metadata, output_data_dir=output_data_dir)

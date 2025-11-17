@@ -8,7 +8,7 @@ import numpy as np
 import torch
 
 from ss_opm.model.encoder_decoder.cite_encoder_decoder_module import CiteEncoderDecoderModule
-from ss_opm.model.encoder_decoder.mlp_module import HierarchicalMLPBModule, MLPBModule
+from ss_opm.model.encoder_decoder.mlp_module import FlowformerEncoder, HierarchicalMLPBModule, MLPBModule
 from ss_opm.model.encoder_decoder.multi_encoder_decoder_module import MultiEncoderDecoderModule
 from ss_opm.model.torch_dataset.citeseq_dataset import CITEseqDataset
 from ss_opm.model.torch_dataset.multiome_dataset import MultiomeDataset
@@ -23,23 +23,24 @@ class EncoderDecoder(object):
         params = {
             "device": device,
             "snapshot": snapshot,
-            "train_batch_size": 64,
+            "train_batch_size": 16,
             "test_batch_size": 16,
             "task_type": task_type,
             "lr": 1e-3,
             "eps": 1e-8,
             "weight_decay": 1e-4,
-            "epoch": 40,
+            "epoch": 1,
             "pct_start": 0.3,
             "burnin_length_epoch": 10,
             "backbone": "mlp",
             "max_inputs_values_noisze_sigma": 0.0,
             "max_cutout_p": 0.0,
+            "use_flowformer_encoder": task_type == "cite",
         }
         if params["backbone"] == "mlp":
             backbone_params = {
-                "encoder_h_dim": 2048,  # 128,
-                "decoder_h_dim": 2048,  # 128,
+                "encoder_h_dim": 32,  # 128,
+                "decoder_h_dim": 32,  # 128,
                 "encoder_dropout_p": 0.0,
                 "decoder_dropout_p": 0.0,
                 "n_encoder_block": 1,
@@ -48,6 +49,9 @@ class EncoderDecoder(object):
                 "activation": "gelu",  # relu, "gelu"
                 # "norm": "batch_norm",
                 "skip": False,
+                "flow_heads": 4,
+                "flow_layers": 2,
+                "cell_emb_style": "cls",
             }
         else:
             raise RuntimeError
@@ -113,24 +117,36 @@ class EncoderDecoder(object):
             return model
         x_dim = self.inputs_info["x_dim"]
         y_dim = self.inputs_info["y_dim"]
-        inputs_decomposer_components = torch.tensor(self.inputs_info["inputs_decomposer_components"])
+        use_flowformer = self.params.get("use_flowformer_encoder", False)
+        inputs_decomposer_components = self.inputs_info.get("inputs_decomposer_components")
+        if inputs_decomposer_components is not None:
+            inputs_decomposer_components = torch.tensor(inputs_decomposer_components)
         targets_decomposer_components = torch.tensor(self.inputs_info["targets_decomposer_components"])
         y_statistic = {}
         for k, v in self.inputs_info["y_statistic"].items():
             y_statistic[k] = torch.tensor(v)
         if self.params["backbone"] == "mlp":
-            encoder = MLPBModule(
-                # input_dim=x_dim,
-                input_dim=None,
-                output_dim=self.params["encoder_h_dim"],
-                n_block=self.params["n_encoder_block"],
-                h_dim=self.params["encoder_h_dim"],
-                skip=self.params["skip"],
-                dropout_p=self.params["encoder_dropout_p"],
-                activation=self.params["activation"],
-                norm=self.params["norm"],
-            )
-
+            if self.params["task_type"] == "cite":
+                encoder = FlowformerEncoder(
+                    gene_list=None,
+                    embed_dim=self.params["encoder_h_dim"],
+                    flow_heads=self.params.get("flow_heads", 4),
+                    flow_layers=self.params.get("flow_layers", 2),
+                    dropout=self.params["encoder_dropout_p"],
+                    cell_emb_style=self.params.get("cell_emb_style", "cls"),
+                    latent_dim=self.params["encoder_h_dim"],
+                )
+            else:
+                encoder = MLPBModule(
+                    input_dim=None,
+                    output_dim=self.params["encoder_h_dim"],
+                    n_block=self.params["n_encoder_block"],
+                    h_dim=self.params["encoder_h_dim"],
+                    skip=self.params["skip"],
+                    dropout_p=self.params["encoder_dropout_p"],
+                    activation=self.params["activation"],
+                    norm=self.params["norm"],
+                )
             decoder = HierarchicalMLPBModule(
                 input_dim=self.params["encoder_h_dim"],
                 # output_dim=y_dim,
@@ -187,16 +203,21 @@ class EncoderDecoder(object):
         if self.params["device"] != "cpu":
             gc.collect()
             torch.cuda.empty_cache()
-        self.inputs_info["x_dim"] = preprocessed_x.shape[1]
+        use_flowformer = self.params.get("use_flowformer_encoder", False)
+        inputs_tensor = x if use_flowformer else preprocessed_x
+        self.inputs_info["x_dim"] = inputs_tensor.shape[1]
         self.inputs_info["y_dim"] = preprocessed_y.shape[1]
 
         dataset = self._build_dataset(
-            x=x, preprocessed_x=preprocessed_x, metadata=metadata, y=y, preprocessed_y=preprocessed_y, eval=False
+            x=x, preprocessed_x=inputs_tensor, metadata=metadata, y=y, preprocessed_y=preprocessed_y, eval=False
         )
         print("dataset size", len(dataset))
         assert len(dataset) > 0
 
-        self.inputs_info["inputs_decomposer_components"] = pre_post_process.preprocesses["inputs_decomposer"].components_
+        if (not use_flowformer) and ("inputs_decomposer" in pre_post_process.preprocesses):
+            self.inputs_info["inputs_decomposer_components"] = pre_post_process.preprocesses["inputs_decomposer"].components_
+        else:
+            self.inputs_info["inputs_decomposer_components"] = None
         self.inputs_info["targets_decomposer_components"] = pre_post_process.preprocesses["targets_decomposer"].components_
 
         y_statistic = {
@@ -323,8 +344,10 @@ class EncoderDecoder(object):
             torch.cuda.empty_cache()
         self.model = self.model.to(self.params["device"])
         self.model.eval()
+        use_flowformer = self.params.get("use_flowformer_encoder", False)
+        inputs_tensor = x if use_flowformer else preprocessed_x
         dataset = self._build_dataset(
-            x=x, preprocessed_x=preprocessed_x, metadata=metadata, y=None, preprocessed_y=None, eval=True
+            x=x, preprocessed_x=inputs_tensor, metadata=metadata, y=None, preprocessed_y=None, eval=True
         )
         test_batch_size = self.params["test_batch_size"]
         data_loader = torch.utils.data.DataLoader(dataset, batch_size=test_batch_size, num_workers=0)

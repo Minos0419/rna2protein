@@ -26,27 +26,56 @@ class CiteEncoderDecoderModule(nn.Module):
         self.y_dim = y_dim
         self.info_dim = len(METADATA_KEYS)
         self.encoder = encoder
+        self.encoder_requires_preprocessed = getattr(encoder, "requires_preprocessed_input", True)
         self.decoder = decoder
         self.y_loc = torch.nn.Parameter(y_statistic["y_loc"], requires_grad=False)
         self.y_scale = torch.nn.Parameter(y_statistic["y_scale"], requires_grad=False)
-        self.inputs_decomposer_components = torch.nn.Parameter(inputs_decomposer_components, requires_grad=False)
         self.targets_decomposer_components = torch.nn.Parameter(targets_decomposer_components, requires_grad=False)
         self.targets_global_median = torch.nn.Parameter(y_statistic["targets_global_median"], requires_grad=False)
         self.correlation_loss_func = correlation_loss
         self.mae_loss_func = nn.L1Loss()
         self.gender_embedding = torch.nn.Parameter(torch.rand(2, encoder_h_dim))
-        self.encoder_in_fc = nn.Linear(x_dim + self.info_dim, encoder_h_dim)
+        if self.encoder_requires_preprocessed:
+            self.encoder_pre_fc = nn.Linear(x_dim + self.info_dim, encoder_h_dim)
+            self.encoder_info_fc = None
+        else:
+            self.encoder_pre_fc = None
+            self.encoder_info_fc = nn.Linear(self.info_dim, encoder_h_dim)
         decoder_out_fcs = []
         for _ in range(n_decoder_block + 1):
             decoder_out_fcs.append(nn.Linear(decoder_h_dim, y_dim))
         self.decoder_out_fcs = nn.ModuleList(decoder_out_fcs)
 
     def _encode(self, x, gender_id, info):
-        h = torch.hstack((x, info.reshape((x.shape[0], self.info_dim))))
-        h = self.encoder_in_fc(h)
-        h = h + self.gender_embedding[gender_id]
-        z, _ = self.encoder(h)
-        return z
+        info_flat = info.reshape((x.shape[0], self.info_dim))
+        if self.encoder_requires_preprocessed:
+            h = torch.hstack((x, info_flat))
+            h = self.encoder_pre_fc(h)
+            h = h + self.gender_embedding[gender_id]
+            encoder_out = self.encoder(h)
+            latent_loss = torch.zeros(1, device=x.device)
+            if isinstance(encoder_out, tuple):
+                z = encoder_out[0]
+            else:
+                z = encoder_out
+        else:
+            encoder_out = self.encoder(x)
+            latent_loss = torch.zeros(1, device=x.device)
+            if isinstance(encoder_out, tuple):
+                if len(encoder_out) == 3:
+                    z, _, latent_loss = encoder_out
+                elif len(encoder_out) == 2:
+                    z, latent_loss = encoder_out
+                else:
+                    z = encoder_out[0]
+            else:
+                z = encoder_out
+            if not torch.is_tensor(latent_loss):
+                latent_loss = torch.tensor(latent_loss, device=z.device)
+            z = z + self.gender_embedding[gender_id]
+            if self.encoder_info_fc is not None:
+                z = z + self.encoder_info_fc(info_flat)
+        return z, latent_loss.mean()
 
     def _decode(self, z, cell_type_id_pred, mask_prob):
         h = z
@@ -60,7 +89,7 @@ class CiteEncoderDecoderModule(nn.Module):
         return ys
 
     def forward(self, x, gender_id, nonzero_ratio):
-        z = self._encode(x, gender_id, nonzero_ratio)
+        z, _ = self._encode(x, gender_id, nonzero_ratio)
         y_preds = self._decode(z, None, None)
         return y_preds
 
@@ -70,7 +99,7 @@ class CiteEncoderDecoderModule(nn.Module):
             "loss_corr": 0,
             "loss_mae": 0,
         }
-        z = self._encode(x=x, gender_id=gender_id, info=info)
+        z, latent_loss = self._encode(x=x, gender_id=gender_id, info=info)
         y_preds = self._decode(z, None, None)
 
         for i in range(len(y_preds)):
@@ -83,6 +112,8 @@ class CiteEncoderDecoderModule(nn.Module):
         ret["loss"] = ret["loss"] + ret["loss_corr"]
         ret["loss_mae"] /= len(y_preds)
         ret["loss"] = ret["loss"] + w * ret["loss_mae"]
+        ret["loss"] = ret["loss"] + latent_loss
+        ret["loss_latent"] = latent_loss
         return ret
 
     def predict(self, x, gender_id, info):
