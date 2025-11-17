@@ -1,5 +1,5 @@
 # open-problems-multimodal
-1st place solution of Kaggle Open Problems - Multimodal Single-Cell Integration
+Modified 1st place solution of Kaggle Open Problems - Multimodal Single-Cell Integration, I add ESM-2 embedder, flowformer encoder, and VAE latent.
 
 ## Preparation
 Install the solution code.
@@ -15,19 +15,14 @@ In addtion, download the following data
 ## Compress data and make addtitional data
 compress kaggle dataset and make addtional data to use in training
 ```shell
-export DATA_DIR=/path/to/kaggle/dataset/Directory
-python3 script/make_compressed_dataset.py --data_dir ${DATA_DIR}
-python3 script/make_additional_files.py --data_dir ${DATA_DIR}
-python3 script/make_cite_input_mask.py --data_dir ${DATA_DIR} --hgnc_complete_set_path /path/to/hgnc_complete_set --reactome_pathways_path /path/to/reactome_pathways
+python3 script/make_compressed_dataset.py
+python3 script/make_additional_files.py
+python3 script/make_cite_input_mask.py
 ```
 
 ## Training
-### Multi
-```shell
-python3 scripts/train_mode.py --data_dir ${DATA_DIR} --task_type multi 
-```
 
 ### Cite
 ```shell
-python3 scripts/train_mode.py --data_dir ${DATA_DIR} --task_type cite 
+python3 scripts/train_mode.py
 ```
